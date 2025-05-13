@@ -1,3 +1,11 @@
+// ✅ Setup (sensors, WiFi, Blynk, GPS, SIM800)
+// 🔄 Loop: Read GPS ➔ Detect Fall ➔ Check Button ➔ Read Vitals.
+// 🚨 On Fall: Alarm ➔ SMS ➔ Blynk Alert.
+// 🛑 User can stop alarm by pressing button.
+// ⏳ After timeout, if no response → "Unconscious" status.
+// 📡 Continuous vitals & GPS updates to Blynk.
+
+
 // ===================== BLYNK Configuration =====================
 #define BLYNK_PRINT Serial
 #define BLYNK_TEMPLATE_ID "TMPL63NYe0GUE"
