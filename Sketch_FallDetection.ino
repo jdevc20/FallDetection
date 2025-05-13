@@ -101,27 +101,67 @@ void loop() {
     timer.run();       // Handle timers
 }
 
-// ===================== Send SMS Alert =====================
-void sendSMS(String latStr, String lngStr) {
-    Serial.println("Sending SMS...");
-    sim800.println("AT+CMGF=1");    // Set SMS to Text Mode
-    delay(100);
-    sim800.println("AT+CMGS=\"+639943106884\""); // Caregiver number
-    delay(300);
-
-    // Compose SMS message
-    sim800.print("🚨 WARNING: A Fall Has Been Detected. Mr. Eghert Mijares may need urgent assistance!\n");
-    sim800.print("📍 Location:\n");
-    sim800.print("Latitude: " + latStr + "\n");
-    sim800.print("Longitude: " + lngStr + "\n");
-    sim800.print("📌 Google Maps: https://maps.google.com/?q=" + latStr + "," + lngStr);
-
-    delay(100);
-    sim800.write(26); // CTRL+Z to send
-    delay(5000);
-
-    Serial.println("SMS sent.");
+void triggerSendSMS(String latStr, String lngStr) {
+  if (!smsInProgress) {
+    smsInProgress = true;
+    smsStep = 0;
+    smsLat = latStr;
+    smsLng = lngStr;
+    smsStartTime = millis();
+    Serial.println("Starting Non-Blocking SMS...");
+  }
 }
+
+void handleSendSMS() {
+  if (!smsInProgress) return;
+
+  unsigned long currentMillis = millis();
+
+  switch (smsStep) {
+    case 0:
+      sim800.println("AT+CMGF=1");
+      smsStartTime = currentMillis;
+      smsStep++;
+      break;
+
+    case 1:
+      if (currentMillis - smsStartTime >= 100) {
+        sim800.println("AT+CMGS=\"+639943106884\"");
+        smsStartTime = currentMillis;
+        smsStep++;
+      }
+      break;
+
+    case 2:
+      if (currentMillis - smsStartTime >= 300) {
+        sim800.print("\xF0\x9F\x9A\xA8 WARNING: A Fall Has Been Detected. Mr. Eghert Mijares may need urgent assistance!\n");
+        sim800.print("\xF0\x9F\x93\x8D Location:\n");
+        sim800.print("Latitude: " + smsLat + "\n");
+        sim800.print("Longitude: " + smsLng + "\n");
+        sim800.print("\xF0\x9F\x93\x8C Google Maps: https://maps.google.com/?q=" + smsLat + "," + smsLng);
+        smsStartTime = currentMillis;
+        smsStep++;
+      }
+      break;
+
+    case 3:
+      if (currentMillis - smsStartTime >= 100) {
+        sim800.write(26);
+        smsStartTime = currentMillis;
+        smsStep++;
+      }
+      break;
+
+    case 4:
+      if (currentMillis - smsStartTime >= 5000) {
+        Serial.println("SMS sent (Non-Blocking).");
+        smsInProgress = false;
+      }
+      break;
+  }
+}
+// --------------------------------
+
 
 // ===================== Fall Detection Logic =====================
 void checkFall() {
