@@ -5,16 +5,11 @@
 // ⏳ After timeout, if no response → "Unconscious" status.
 // 📡 Continuous vitals & GPS updates to Blynk.
 
-
-// ===================== BLYNK Configuration =====================
-#define BLYNK_PRINT Serial
-#define BLYNK_TEMPLATE_ID "TMPL63NYe0GUE"
-#define BLYNK_TEMPLATE_NAME "Fall Detection"
-#define BLYNK_AUTH_TOKEN "BYnM7a9A-cgi05LWI27PorOGCD_cAIyM"
-
-// ===================== WiFi Credentials =====================
-char ssid[] = "EGHERT";
-char pass[] = "Keena1023";
+//ESP32
+// Max30102
+//MPU6050
+//Gps Neo6m
+// SIM800L
 
 // ===================== Library Includes =====================
 #include <WiFi.h>
@@ -24,23 +19,27 @@ char pass[] = "Keena1023";
 #include <MPU6050.h>
 #include "MAX30105.h"
 #include "heartRate.h"
-
+// ===================== BLYNK Configuration =====================
+#define BLYNK_PRINT Serial
+#define BLYNK_TEMPLATE_ID "TMPL63NYe0GUE"
+#define BLYNK_TEMPLATE_NAME "Fall Detection"
+#define BLYNK_AUTH_TOKEN "BYnM7a9A-cgi05LWI27PorOGCD_cAIyM"
+// ===================== WiFi Credentials =====================
+char ssid[] = "EGHERT";
+char pass[] = "Keena1023";
 // ===================== Pin Definitions =====================
 #define GPS_TX 34
 #define GPS_RX 35
 #define buzzerPin 27
 #define buttonPin 32
-
-// ===================== Hardware Serial =====================
+// ===================== 🗜️ Hardware Serial =====================
 HardwareSerial SerialGPS(2);
 HardwareSerial sim800(1);
-
-// ===================== Sensor Instances =====================
+// ===================== 🕵️ Sensor Instances =====================
 MAX30105 particleSensor;
 TinyGPSPlus gps;
 MPU6050 mpu;
-
-// ===================== Global Variables =====================
+// ===================== 🌍 Global Variables =====================
 BlynkTimer timer;
 bool fallDetected = false;
 bool buttonPressed = false;
@@ -126,39 +125,76 @@ void sendSMS(String latStr, String lngStr) {
 
 // ===================== Fall Detection Logic =====================
 void checkFall() {
-    int16_t ax, ay, az, gx, gy, gz;
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  int16_t ax, ay, az, gx, gy, gz;
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
-    // Thresholds for detecting a fall
-    if (!fallDetected && (abs(ax) > 20000 || abs(ay) > 25000 || abs(az) < 5000)) {
+  // Convert raw to g (assuming ±2g range, sensitivity = 16384 LSB/g)
+  float ax_g = ax / 16384.0;
+  float ay_g = ay / 16384.0;
+  float az_g = az / 16384.0;
+
+  // Compute acceleration magnitude (G-force)
+  float accMagnitude = sqrt(ax_g * ax_g + ay_g * ay_g + az_g * az_g);
+
+  // Compute tilt angles
+  float pitch = atan2(ax_g, sqrt(ay_g * ay_g + az_g * az_g)) * 180.0 / PI;
+  float roll = atan2(ay_g, sqrt(ax_g * ax_g + az_g * az_g)) * 180.0 / PI;
+
+  // Debug prints
+  Serial.print("G-Force: "); Serial.print(accMagnitude, 2);
+  Serial.print(" | Pitch: "); Serial.print(pitch, 1);
+  Serial.print(" | Roll: "); Serial.println(roll, 1);
+
+  // Adaptive thresholds
+  const float impactThreshold = 2.5;  // 2.5g impact
+  const float tiltChangeThreshold = 45.0; // 45 degrees tilt
+  static unsigned long impactStartTime = 0;
+  static bool impactDetected = false;
+
+  if (!fallDetected) {
+    if (accMagnitude > impactThreshold) {
+      impactDetected = true;
+      impactStartTime = millis();
+    }
+
+    // Check if tilt confirms fall (after impact)
+    if (impactDetected && (millis() - impactStartTime < 1000)) {
+      if (abs(pitch) > tiltChangeThreshold || abs(roll) > tiltChangeThreshold) {
         fallDetected = true;
         fallTime = millis();
         buttonPressed = false;
 
-        digitalWrite(buzzerPin, HIGH);  // Activate buzzer
+        digitalWrite(buzzerPin, HIGH);
 
-        // Get GPS location
         String latStr = gps.location.isValid() ? String(gps.location.lat(), 6) : "N/A";
         String lngStr = gps.location.isValid() ? String(gps.location.lng(), 6) : "N/A";
 
         if (gps.location.isValid()) {
-            Blynk.virtualWrite(V8, gps.location.lat());
-            Blynk.virtualWrite(V9, gps.location.lng());
+          Blynk.virtualWrite(V8, gps.location.lat());
+          Blynk.virtualWrite(V9, gps.location.lng());
         }
 
-        // Send SMS and Blynk event
-        sendSMS(latStr, lngStr);
+        triggerSendSMS(latStr, lngStr);
         Blynk.logEvent("fall_alert", "Fall detected!");
-        Serial.println("Fall Detected. Alarm On. SMS Sent.");
+
+        Serial.println("Fall Detected (Adaptive). Alarm On. SMS Triggered.");
+        impactDetected = false;
+      }
     }
 
-    // Handle unconscious case after timeout
-    if (fallDetected && (millis() - fallTime >= fallTimeout)) {
-        if (!buttonPressed) {
-            Blynk.virtualWrite(V10, "Unconscious");
-            Serial.println("Elderly is unconscious");
-        }
+    // Reset if no tilt change within timeout
+    if (impactDetected && (millis() - impactStartTime >= 1000)) {
+      impactDetected = false;
     }
+  }
+
+  // Unconscious state check
+  if (fallDetected && (millis() - fallTime >= fallTimeout)) {
+    if (!buttonPressed) {
+      Blynk.virtualWrite(V10, "Unconscious");
+      Serial.println("Elderly is unconscious");
+    }
+  }
 }
 
 // ===================== Button Check =====================
